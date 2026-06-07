@@ -1,535 +1,359 @@
 # -*- coding: utf-8 -*-
-# FILE: zefoy_pc_full_auto.py
-# PHIÊN BẢN: TÍCH HỢP TẤT CẢ - CHROMIUM + TESSERACT + TỰ ĐỘNG CÀI ĐẶT
-# CHỈ CẦN CHẠY FILE NÀY - MỌI THỨ TỰ ĐỘNG
+# FILE: tiktok_tool.py
+# REPO: https://github.com/Hello-tuan/tiktok-tool
+# TỰ ĐỘNG CẬP NHẬT TỪ GITHUB -> ĐỒNG BỘ PC & PHONE
 
-import subprocess
-import sys
-import os
 import time
 import threading
 import random
 import re
 import io
 import base64
-import zipfile
-import tarfile
-import requests
+import os
+import sys
 import json
+import hashlib
+import requests
 import shutil
-import stat
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
 
 # ====================================================
-# TỰ ĐỘNG CÀI ĐẶT TẤT CẢ
+# THÔNG TIN GITHUB CỦA BẠN
 # ====================================================
-def setup_environment():
-    """Tự động cài đặt mọi thứ cần thiết"""
-    print("\033[1;36m  ⏳ ĐANG KIỂM TRA & CÀI ĐẶT MÔI TRƯỜNG...\033[0m")
-    print("=" * 55)
-    
-    # 1. Cài thư viện Python
-    required_packages = {
-        'selenium': 'selenium',
-        'PIL': 'Pillow',
-        'pytesseract': 'pytesseract',
-        'requests': 'requests',
-        'webdriver_manager': 'webdriver-manager',
-    }
-    
-    for module, package in required_packages.items():
-        try:
-            __import__(module)
-            print(f"  \033[92m✅ {package}\033[0m")
-        except ImportError:
-            print(f"  \033[93m⏳ Đang cài {package}...\033[0m")
-            subprocess.check_call([sys.executable, "-m", "pip", "install", package, "--quiet"])
-            print(f"  \033[92m✅ {package} - Đã cài\033[0m")
-    
-    # 2. Cài Tesseract OCR
-    tesseract_path = find_or_install_tesseract()
-    
-    # 3. Cài Chromium + ChromeDriver
-    chrome_path = find_or_install_chromium()
-    
-    print("=" * 55)
-    print(f"  \033[92m✅ MÔI TRƯỜNG SẴN SÀNG!\033[0m")
-    print(f"  Tesseract: {tesseract_path or '❌'}")
-    print(f"  Chromium: {chrome_path or '❌'}")
-    print("=" * 55)
-    
-    return tesseract_path, chrome_path
-
-def find_or_install_tesseract():
-    """Tìm hoặc cài Tesseract OCR"""
-    # Các đường dẫn có thể có
-    possible_paths = [
-        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
-        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
-        os.path.expanduser(r"~\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"),
-        r"C:\Tesseract-OCR\tesseract.exe",
-        "/usr/bin/tesseract",
-        "/usr/local/bin/tesseract",
-    ]
-    
-    for path in possible_paths:
-        if os.path.exists(path):
-            import pytesseract
-            pytesseract.pytesseract.tesseract_cmd = path
-            print(f"  \033[92m✅ Tìm thấy Tesseract: {path}\033[0m")
-            return path
-    
-    # Tự động cài Tesseract trên Windows
-    if os.name == 'nt':
-        print("  \033[93m⏳ Đang tải Tesseract OCR...\033[0m")
-        tesseract_url = "https://github.com/UB-Mannheim/tesseract/releases/download/v5.3.3/tesseract-ocr-w64-setup-5.3.3.20231005.exe"
-        installer_path = os.path.join(os.environ.get('TEMP', '.'), "tesseract_installer.exe")
-        
-        try:
-            # Tải installer
-            response = requests.get(tesseract_url, stream=True)
-            total = int(response.headers.get('content-length', 0))
-            
-            with open(installer_path, 'wb') as f:
-                downloaded = 0
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if total > 0:
-                        pct = downloaded / total * 100
-                        print(f"\r  ⏳ Tải Tesseract: {pct:.0f}%", end='', flush=True)
-            print()
-            
-            # Cài đặt silent
-            print("  ⏳ Đang cài Tesseract...")
-            subprocess.run([installer_path, "/S", "/D=C:\\Tesseract-OCR"], 
-                         capture_output=True, timeout=120)
-            
-            # Kiểm tra lại
-            test_path = r"C:\Tesseract-OCR\tesseract.exe"
-            if os.path.exists(test_path):
-                import pytesseract
-                pytesseract.pytesseract.tesseract_cmd = test_path
-                print(f"  \033[92m✅ Tesseract đã cài: {test_path}\033[0m")
-                return test_path
-            
-        except Exception as e:
-            print(f"  \033[91m❌ Không thể cài Tesseract: {e}\033[0m")
-            print("  \033[93m  Vui lòng cài thủ công:\033[0m")
-            print("  \033[93m  https://github.com/UB-Mannheim/tesseract/wiki\033[0m")
-    
-    return None
-
-def find_or_install_chromium():
-    """Tìm Chrome hoặc cài Chromium"""
-    # Tìm Chrome trước
-    chrome_paths = [
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe"),
-        r"C:\Program Files\Chromium\Application\chrome.exe",
-        "/usr/bin/chromium-browser",
-        "/usr/bin/chromium",
-        "/usr/bin/google-chrome",
-    ]
-    
-    for path in chrome_paths:
-        if os.path.exists(path):
-            print(f"  \033[92m✅ Tìm thấy Chrome/Chromium: {path}\033[0m")
-            return path
-    
-    # Tự cài Chromium portable trên Windows
-    if os.name == 'nt':
-        print("  \033[93m⏳ Đang tải Chromium portable...\033[0m")
-        chromium_url = "https://storage.googleapis.com/chromium-browser-snapshots/Win/1315727/chrome-win.zip"
-        chromium_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chromium")
-        chromium_exe = os.path.join(chromium_dir, "chrome-win", "chrome.exe")
-        
-        if not os.path.exists(chromium_exe):
-            try:
-                zip_path = os.path.join(os.environ.get('TEMP', '.'), "chromium.zip")
-                
-                # Tải
-                response = requests.get(chromium_url, stream=True)
-                total = int(response.headers.get('content-length', 0))
-                
-                with open(zip_path, 'wb') as f:
-                    downloaded = 0
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if total > 0:
-                            pct = downloaded / total * 100
-                            print(f"\r  ⏳ Tải Chromium: {pct:.0f}%", end='', flush=True)
-                print()
-                
-                # Giải nén
-                print("  ⏳ Đang giải nén Chromium...")
-                os.makedirs(chromium_dir, exist_ok=True)
-                with zipfile.ZipFile(zip_path, 'r') as zf:
-                    zf.extractall(chromium_dir)
-                
-                # Xóa file zip
-                os.remove(zip_path)
-                
-                if os.path.exists(chromium_exe):
-                    print(f"  \033[92m✅ Chromium đã cài: {chromium_exe}\033[0m")
-                    return chromium_exe
-                    
-            except Exception as e:
-                print(f"  \033[91m❌ Không thể tải Chromium: {e}\033[0m")
-    
-    return None
-
-# ====================================================
-# KHỞI TẠO MÔI TRƯỜNG
-# ====================================================
-TESSERACT_PATH, CHROMIUM_PATH = setup_environment()
-
-# Import sau khi cài
-import warnings
-warnings.filterwarnings('ignore')
-
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from webdriver_manager.chrome import ChromeDriverManager
-from PIL import Image
-import pytesseract
+GITHUB_USER = "Hello-tuan"
+GITHUB_REPO = "tiktok-tool"
+GITHUB_BRANCH = "main"
+GITHUB_RAW = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}"
 
 # ====================================================
 # MÀU SẮC
 # ====================================================
-os.system('')
 R = '\033[91m'; G = '\033[92m'; Y = '\033[93m'
-C = '\033[96m'; M = '\033[95m'; N = '\033[0m'; B = '\033[1m'
+C = '\033[96m'; N = '\033[0m'; B = '\033[1m'
 
 def clear(): os.system('cls' if os.name == 'nt' else 'clear')
-def ok(s):    print(f"  {G}✅ {s}{N}")
-def err(s):   print(f"  {R}❌ {s}{N}")
-def info(s):  print(f"  {C}ℹ️  {s}{N}")
-def warn(s):  print(f"  {Y}⚠️  {s}{N}")
+def ok(s):   print(f"  {G}✅ {s}{N}")
+def err(s):  print(f"  {R}❌ {s}{N}")
+def info(s): print(f"  {C}ℹ️  {s}{N}")
+def warn(s): print(f"  {Y}⚠️  {s}{N}")
 
 # ====================================================
-# LOADING BAR
+# PHÁT HIỆN THIẾT BỊ
 # ====================================================
-def progress_bar(current, total, label="", width=30):
-    pct = current / total * 100 if total > 0 else 0
-    filled = int(width * current / total) if total > 0 else 0
-    bar = f"{G}{'█' * filled}{N}{'░' * (width - filled)}"
-    print(f"\r  {label} [{bar}] {pct:.1f}% ({current}/{total})", end='', flush=True)
-
-def countdown(seconds, label="Đợi"):
-    for i in range(seconds, 0, -1):
-        pct = (seconds - i + 1) / seconds * 100
-        bar_len = 25
-        filled = int(bar_len * (seconds - i + 1) / seconds)
-        bar = f"{C}{'█' * filled}{N}{'░' * (bar_len - filled)}"
-        print(f"\r  {label} [{bar}] {i}s", end='', flush=True)
-        time.sleep(1)
-    print()
-
-# ====================================================
-# GIẢI CAPTCHA
-# ====================================================
-def solve_captcha(driver):
-    if not TESSERACT_PATH:
-        return None
-    
+def get_device_id():
     try:
-        imgs = driver.find_elements(By.TAG_NAME, "img")
-        
-        for img in imgs:
-            try:
-                src = (img.get_attribute('src') or '').lower()
-                if 'captcha' in src or 'verify' in src:
-                    img_b64 = img.screenshot_as_base64
-                    img_bytes = base64.b64decode(img_b64)
-                    pil_img = Image.open(io.BytesIO(img_bytes))
-                    pil_img = pil_img.convert('L')
-                    pil_img = pil_img.point(lambda x: 0 if x < 130 else 255)
-                    pil_img = pil_img.resize((pil_img.width * 3, pil_img.height * 3), Image.LANCZOS)
-                    
-                    text = pytesseract.image_to_string(pil_img, config='--psm 7')
-                    text = text.strip().replace(' ', '').replace('\n', '')
-                    
-                    if len(text) >= 3:
-                        return text
-            except:
-                continue
+        if os.name == 'nt':
+            return hashlib.md5(os.environ.get('COMPUTERNAME', 'PC').encode()).hexdigest()[:8]
+        else:
+            import socket
+            return hashlib.md5(socket.gethostname().encode()).hexdigest()[:8]
     except:
-        pass
-    
-    return None
+        return hashlib.md5(str(random.random()).encode()).hexdigest()[:8]
+
+DEVICE_ID = get_device_id()
+DEVICE_TYPE = "PC" if os.name == 'nt' else "Phone"
+CURRENT_VERSION = "1.0.0"
 
 # ====================================================
-# ZEFOY BOT
+# CÀI THƯ VIỆN TỰ ĐỘNG
 # ====================================================
-class ZefoyBot:
-    def __init__(self):
-        self.driver = None
-        self.url = ""
-        self.running = False
-        self.stats = {"total": 0, "ok": 0, "fail": 0, "captcha": 0}
-        self.headless = True
-    
-    def init_driver(self):
-        options = Options()
-        
-        if self.headless:
-            options.add_argument("--headless=new")
-        
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--window-size=450,850")
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_argument("--disable-notifications")
-        options.add_argument("--log-level=3")
-        options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
-        options.add_experimental_option('useAutomationExtension', False)
-        options.add_argument("--user-agent=Mozilla/5.0 (Linux; Android 14; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.135 Mobile Safari/537.36")
-        
-        # Dùng Chromium nếu có
-        if CHROMIUM_PATH:
-            options.binary_location = CHROMIUM_PATH
-        
-        # ChromeDriver tự động
-        service = Service(ChromeDriverManager().install())
-        self.driver = webdriver.Chrome(service=service, options=options)
-        self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        return True
-    
-    def fill_input(self, text):
+def install_deps():
+    pkgs = {
+        'selenium': 'selenium',
+        'PIL': 'Pillow',
+        'pytesseract': 'pytesseract',
+        'requests': 'requests',
+    }
+    for module, package in pkgs.items():
         try:
-            inputs = self.driver.find_elements(By.TAG_NAME, "input")
-            textareas = self.driver.find_elements(By.TAG_NAME, "textarea")
-            all_fields = inputs + textareas
-            
-            if not all_fields:
-                return False
-            
-            best = max(all_fields, key=lambda x: int(x.get_attribute('maxlength') or '0'))
-            best.clear()
-            time.sleep(0.2)
-            best.send_keys(text)
-            time.sleep(0.3)
-            return True
+            __import__(module)
         except:
-            return False
-    
-    def click_send(self):
+            print(f"  Đang cài {package}...")
+            os.system(f"{sys.executable} -m pip install {package} --quiet 2>/dev/null")
+
+install_deps()
+import warnings
+warnings.filterwarnings('ignore')
+
+# ====================================================
+# TỰ ĐỘNG CẬP NHẬT
+# ====================================================
+class Updater:
+    @staticmethod
+    def check():
+        """Kiểm tra version mới từ GitHub"""
         try:
-            buttons = self.driver.find_elements(By.TAG_NAME, "button")
-            keywords = ['send', 'submit', 'start', 'views', 'get', 'free', 'search', 'go']
-            
-            for btn in buttons:
-                try:
-                    text = (btn.text or '').lower()
-                    if any(kw in text for kw in keywords):
-                        btn.click()
-                        return True
-                except:
-                    continue
-            
-            inputs = self.driver.find_elements(By.TAG_NAME, "input")
-            if inputs:
-                inputs[0].send_keys(Keys.RETURN)
-                return True
+            resp = requests.get(f"{GITHUB_RAW}/version.json", timeout=10)
+            if resp.status_code == 200:
+                remote = resp.json()
+                remote_ver = remote.get('version', '0.0.0')
+                
+                if remote_ver > CURRENT_VERSION:
+                    return {
+                        'new_version': remote_ver,
+                        'current_version': CURRENT_VERSION,
+                        'changelog': remote.get('changelog', ''),
+                        'file_url': f"{GITHUB_RAW}/tiktok_tool.py",
+                    }
         except:
             pass
-        return False
+        return None
     
-    def handle_captcha(self):
+    @staticmethod
+    def update(file_url):
+        """Tải bản mới từ GitHub"""
         try:
-            page = self.driver.page_source.lower()
-            if 'captcha' not in page and 'verify' not in page:
+            info("Đang tải bản cập nhật...")
+            
+            # Backup
+            os.makedirs("backups", exist_ok=True)
+            backup_name = f"backups/backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.py"
+            if os.path.exists(__file__):
+                shutil.copy2(__file__, backup_name)
+            
+            # Tải file mới
+            resp = requests.get(file_url, timeout=30)
+            if resp.status_code == 200:
+                with open(__file__, 'w', encoding='utf-8') as f:
+                    f.write(resp.text)
+                ok("Cập nhật thành công!")
+                ok("Khởi động lại...")
+                time.sleep(2)
+                os.execv(sys.executable, [sys.executable] + sys.argv)
                 return True
             
-            # Thử OCR
-            answer = solve_captcha(self.driver)
-            if answer:
-                self.stats["captcha"] += 1
-                print(f"  {G}🤖 OCR: {answer}{N}")
-                
-                inputs = self.driver.find_elements(By.TAG_NAME, "input")
-                for inp in inputs:
-                    ph = (inp.get_attribute('placeholder') or '').lower()
-                    if 'captcha' in ph or 'verify' in ph or 'answer' in ph:
-                        inp.clear()
-                        inp.send_keys(answer)
-                        time.sleep(0.5)
-                        self.click_send()
-                        time.sleep(3)
-                        return True
-                
-                if inputs:
-                    inputs[-1].clear()
-                    inputs[-1].send_keys(answer)
-                    time.sleep(0.5)
-                    self.click_send()
-                    time.sleep(3)
-                    return True
-            
-            # Cần người giải
-            if self.headless:
-                warn("Đang mở trình duyệt để giải captcha...")
-                self.driver.quit()
-                self.headless = False
-                time.sleep(2)
-                self.init_driver()
-                self.driver.get("https://zefoy.com")
-                time.sleep(4)
-            
-            print(f"\n{Y}{'='*50}{N}")
-            print(f"{Y}⚠️  VUI LÒNG GIẢI CAPTCHA TRÊN TRÌNH DUYỆT{N}")
-            print(f"{Y}  Sau đó nhấn Enter để tiếp tục...{N}")
-            print(f"{Y}{'='*50}{N}")
-            input(f"  {C}> {N}")
-            return True
-            
-        except:
-            return True
-    
-    def submit_once(self):
-        try:
-            self.driver.get("https://zefoy.com")
-            time.sleep(4)
-            self.handle_captcha()
-            time.sleep(2)
-            
-            if not self.fill_input(self.url):
-                return False
-            
-            self.click_send()
-            time.sleep(5)
-            self.handle_captcha()
-            time.sleep(3)
-            
-            page = self.driver.page_source.lower()
-            if 'error' in page or 'fail' in page or 'invalid' in page:
-                return False
-            
-            return True
-            
+            return False
         except Exception as e:
             err(f"Lỗi: {e}")
             return False
-    
-    def run_loop(self, delay=60):
-        self.running = True
-        
-        print(f"\n{B}{Y}{'='*50}{N}")
-        print(f"{B}{G}  🎵 ZEFOY AUTO VIEWS{N}")
-        print(f"{B}{Y}{'='*50}{N}")
-        print(f"  Link: {self.url[:45]}...")
-        print(f"  Delay: {delay}s")
-        print(f"  Chế độ: {'ẨN' if self.headless else 'HIỆN'}")
-        print(f"  OCR: {G if TESSERACT_PATH else R}{'CÓ' if TESSERACT_PATH else 'KHÔNG'}{N}")
-        print(f"{'='*50}\n")
-        
-        while self.running:
-            self.stats["total"] += 1
-            
-            print(f"{B}┌─ Lần #{self.stats['total']} ──────────────────┐{N}")
-            
-            if self.submit_once():
-                self.stats["ok"] += 1
-                ok(f"OK! ({self.stats['ok']}/{self.stats['total']})")
-            else:
-                self.stats["fail"] += 1
-                err(f"Fail ({self.stats['fail']}/{self.stats['total']})")
-            
-            print(f"│ 📊 OK:{G}{self.stats['ok']}{N} Fail:{R}{self.stats['fail']}{N} | 🤖 Captcha:{self.stats['captcha']}")
-            print(f"{B}└{'─'*40}┘{N}\n")
-            
-            countdown(delay, "⏳ Nghỉ")
-    
-    def stop(self):
-        self.running = False
-        if self.driver:
-            try: self.driver.quit()
-            except: pass
 
 # ====================================================
-# MENU
+# GỬI ZEFOY
+# ====================================================
+def send_to_zefoy(tiktok_url):
+    """Gửi link TikTok lên Zefoy"""
+    try:
+        sess = requests.Session()
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Linux; Android 14; SM-S928B) AppleWebKit/537.36",
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+        
+        resp = sess.get("https://zefoy.com", headers=headers, timeout=10)
+        
+        action = re.search(r'action=["\']([^"\']+)["\']', resp.text)
+        token = re.search(r'name=["\']_token["\']\s+value=["\']([^"\']+)["\']', resp.text)
+        
+        if not action or not token:
+            return False, "Không tìm thấy form Zefoy"
+        
+        action_url = action.group(1)
+        if not action_url.startswith('http'):
+            action_url = f"https://zefoy.com/{action_url.lstrip('/')}"
+        
+        data = {"_token": token.group(1), "url": tiktok_url}
+        resp2 = sess.post(action_url, data=data, headers=headers, timeout=15)
+        
+        if 'error' in resp2.text.lower():
+            return False, "Zefoy báo lỗi"
+        
+        return True, "OK"
+    except requests.exceptions.Timeout:
+        return False, "Timeout"
+    except requests.exceptions.ConnectionError:
+        return False, "Không kết nối được Zefoy"
+    except Exception as e:
+        return False, str(e)[:30]
+
+# ====================================================
+# GỬI VIEW TRỰC TIẾP (FALLBACK)
+# ====================================================
+def send_direct_view(video_id, count=50):
+    """Gửi view trực tiếp qua TikTok API"""
+    ok_count = 0
+    
+    for _ in range(count):
+        try:
+            did = str(random.randint(10**18, 10**19-1))
+            iid = str(random.randint(10**10, 10**11-1))
+            
+            r = requests.get(
+                "https://api16-normal-c-useast1a.tiktokv.com/aweme/v1/aweme/detail/",
+                params={
+                    "aweme_id": video_id, "device_id": did, "install_id": iid,
+                    "aid": "1233", "app_name": "musical_ly", "channel": "googleplay",
+                    "device_platform": "android", "os_version": str(random.randint(12,15)),
+                    "version_code": "320503", "language": "en",
+                    "region": random.choice(["US","VN","ID"]),
+                    "ts": str(int(time.time()*1000))
+                },
+                headers={"User-Agent": f"com.zhiliaoapp.musically/2023205030"},
+                timeout=5
+            )
+            
+            if r.status_code == 200:
+                ok_count += 1
+                
+            time.sleep(random.uniform(0.01, 0.05))
+        except:
+            pass
+    
+    return ok_count
+
+def get_video_id(url):
+    """Lấy video ID từ link"""
+    m = re.search(r'/video/(\d+)', url)
+    if m: return m.group(1)
+    
+    if any(s in url for s in ['vm.tiktok.com', 'vt.tiktok.com', 'tiktok.com/t/']):
+        try:
+            r = requests.head(url, allow_redirects=True, timeout=10,
+                headers={"User-Agent": "Mozilla/5.0"})
+            m = re.search(r'/video/(\d+)', r.url)
+            if m: return m.group(1)
+        except: pass
+    
+    return ""
+
+# ====================================================
+# MENU CHÍNH
 # ====================================================
 def main():
-    bot = ZefoyBot()
-    thread = None
+    clear()
+    print(f"{B}{Y}{'='*50}{N}")
+    print(f"{B}{Y}  🎵 TIKTOK TOOL{N}")
+    print(f"{B}{Y}{'='*50}{N}")
+    print(f"  Thiết bị: {C}{DEVICE_TYPE}{N} ({DEVICE_ID})")
+    print(f"  Version: {C}v{CURRENT_VERSION}{N}")
+    print(f"  Repo: {C}github.com/{GITHUB_USER}/{GITHUB_REPO}{N}")
+    print(f"{'='*50}")
     
-    while True:
-        clear()
-        print(f"{B}{Y}{'='*50}{N}")
-        print(f"{B}{Y}  🤖 ZEFOY AUTO - TIKTOK VIEW BUFFER{N}")
-        print(f"{B}{Y}{'='*50}{N}")
+    # Kiểm tra cập nhật
+    print(f"\n{C}  🔍 Kiểm tra cập nhật...{N}")
+    update_info = Updater.check()
+    
+    if update_info:
+        print(f"\n{Y}  🔄 CÓ PHIÊN BẢN MỚI!{N}")
+        print(f"  v{update_info['current_version']} → v{update_info['new_version']}")
+        if update_info['changelog']:
+            print(f"  Thay đổi: {update_info['changelog']}")
         
-        if bot.url:
-            print(f"  {C}Link:{N} {bot.url[:40]}...")
+        yn = input(f"\n  Cập nhật? (y/n): ").strip().lower()
+        if yn == 'y':
+            Updater.update(update_info['file_url'])
+            return
+    else:
+        ok(f"Đã là bản mới nhất (v{CURRENT_VERSION})")
+    
+    print(f"\n{B}{Y}{'='*50}{N}")
+    print(f"  {B}1.{N} 🎯 Nhập link TikTok → Gửi Zefoy + Direct")
+    print(f"  {B}2.{N} 🔄 Chạy liên tục (loop)")
+    print(f"  {B}3.{N} 🔍 Kiểm tra cập nhật")
+    print(f"  {B}4.{N} 🚪 Thoát")
+    print(f"{B}{Y}{'='*50}{N}")
+    
+    c = input(f"\n> ").strip()
+    
+    if c == "1":
+        url = input(f"\n{Y}Dán link TikTok:{N} ").strip()
         
-        print(f"  {G}OK:{N}{bot.stats['ok']} | {R}Fail:{N}{bot.stats['fail']} | 🤖:{bot.stats['captcha']}")
-        print(f"  Chế độ: {'ẨN' if bot.headless else 'HIỆN'}")
-        print(f"  {'● ĐANG CHẠY' if bot.running else '● DỪNG'}")
-        print(f"{'-'*50}")
-        print(f"  {B}1.{N} 🎯 Nhập link + CHẠY")
-        print(f"  {B}2.{N} 👁  Ẩn/Hiện browser")
-        print(f"  {B}3.{N} ⏹  DỪNG")
-        print(f"  {B}4.{N} 🚪 Thoát")
-        print(f"{B}{Y}{'='*50}{N}")
-        
-        c = input(f"\n> ").strip()
-        
-        if c == "1":
-            print(f"\n{Y}Dán link TikTok:{N}")
-            url = input("> ").strip()
-            
-            if not url or "tiktok.com" not in url:
-                err("Link không hợp lệ!")
-                input("\nEnter...")
-                continue
-            
-            bot.url = url
-            bot.stats = {"total": 0, "ok": 0, "fail": 0, "captcha": 0}
-            
-            delay = input(f"Delay (giây) [60]: ").strip()
-            delay = int(delay) if delay.isdigit() else 60
-            
-            info("Khởi tạo Chrome + ChromeDriver...")
-            if not bot.init_driver():
-                err("Không khởi tạo được!")
-                input("\nEnter...")
-                continue
-            
-            ok("Sẵn sàng!")
-            
-            thread = threading.Thread(target=bot.run_loop, args=(delay,), daemon=True)
-            thread.start()
-            
-            input(f"\n{G}✅ Đang chạy!{N} Enter về menu...")
-        
-        elif c == "2":
-            bot.headless = not bot.headless
-            if bot.driver:
-                bot.driver.quit()
-                bot.init_driver()
-            ok(f"Chế độ: {'ẨN' if bot.headless else 'HIỆN'}")
+        if "tiktok.com" not in url:
+            err("Link không hợp lệ!")
             input("\nEnter...")
+            main()
+            return
         
-        elif c == "3":
-            bot.stop()
-            ok("Đã dừng!")
+        vid = get_video_id(url)
+        print(f"\n  Video ID: {vid or 'Không tìm thấy'}")
+        
+        # 1. Gửi Zefoy
+        print(f"\n{C}  Gửi Zefoy...{N}")
+        success, msg = send_to_zefoy(url)
+        if success:
+            ok(f"Zefoy: {msg}")
+        else:
+            warn(f"Zefoy: {msg}")
+        
+        # 2. Gửi direct nếu có video ID
+        if vid:
+            views = input(f"\n  Gửi thêm bao nhiêu view trực tiếp? [50]: ").strip()
+            views = int(views) if views.isdigit() else 50
+            
+            print(f"{C}  Đang gửi {views} views trực tiếp...{N}")
+            sent = send_direct_view(vid, views)
+            ok(f"Đã gửi: {sent}/{views} views")
+        
+        input("\nEnter để về menu...")
+        main()
+    
+    elif c == "2":
+        url = input(f"\n{Y}Dán link TikTok:{N} ").strip()
+        
+        if "tiktok.com" not in url:
+            err("Link không hợp lệ!")
             input("\nEnter...")
+            main()
+            return
         
-        elif c == "4":
-            bot.stop()
-            print(f"\n{Y}👋 Tạm biệt!{N}")
-            sys.exit(0)
+        delay = input(f"Delay mỗi lần (giây) [60]: ").strip()
+        delay = int(delay) if delay.isdigit() else 60
+        
+        vid = get_video_id(url)
+        
+        count = 0
+        print(f"\n{B}Đang chạy... (Ctrl+C để dừng){N}\n")
+        
+        try:
+            while True:
+                count += 1
+                print(f"{B}┌─ Lần #{count}{N}")
+                
+                # Zefoy
+                success, msg = send_to_zefoy(url)
+                if success:
+                    ok(f"Zefoy OK")
+                else:
+                    warn(f"Zefoy: {msg}")
+                
+                # Direct views
+                if vid:
+                    sent = send_direct_view(vid, 30)
+                    ok(f"Direct: {sent} views")
+                
+                print(f"{B}└{'─'*40}┘{N}")
+                
+                # Đếm ngược
+                for i in range(delay, 0, -1):
+                    pct = (delay - i + 1) / delay * 100
+                    bar_len = 25
+                    filled = int(bar_len * (delay - i + 1) / delay)
+                    bar = f"{C}{'█' * filled}{N}{'░' * (bar_len - filled)}"
+                    print(f"\r  ⏳ [{bar}] {i}s ({pct:.0f}%)", end='', flush=True)
+                    time.sleep(1)
+                print("\n")
+                
+        except KeyboardInterrupt:
+            print(f"\n{Y}  Đã dừng!{N}")
+    
+    elif c == "3":
+        print(f"\n{C}  Đang kiểm tra...{N}")
+        update_info = Updater.check()
+        if update_info:
+            print(f"{Y}  Có bản mới: v{update_info['new_version']}{N}")
+        else:
+            ok(f"Đã là bản mới nhất!")
+        input("\nEnter...")
+        main()
+    
+    elif c == "4":
+        print(f"\n{Y}👋 Tạm biệt!{N}")
+        sys.exit(0)
+    else:
+        main()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print(f"\n{Y}👋 Tạm biệt!{N}")
+        sys.exit(0)
